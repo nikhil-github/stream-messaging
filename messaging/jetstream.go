@@ -2,6 +2,7 @@ package messaging
 
 import (
     "fmt"
+    "time"
 
     "github.com/nats-io/nats.go"
 )
@@ -46,14 +47,44 @@ func (s *jetStream) NewPublisher(streamName string) (Publisher, error) {
 }
 
 func (s *jetStream) NewConsumer(streamName string, cfg ConsumerConfig) (Consumer, error) {
-	sub, err := s.js.PullSubscribe(cfg.Subject, cfg.Durable,
-		nats.BindStream(streamName),
-		nats.AckWait(cfg.AckWait),
-	)
+    // Determine durable name, prefer cfg.Durable then cfg.ConsumerGroup
+    durable := cfg.Durable
+    if durable == "" {
+        durable = cfg.ConsumerGroup
+    }
+
+    // Choose filter subject. Prefer explicit FilterSubject else fallback to Subject.
+    filter := cfg.FilterSubject
+    if filter == "" {
+        filter = cfg.Subject
+    }
+
+    // Build consumer options
+    opts := []nats.SubOpt{
+        nats.BindStream(streamName),
+    }
+    if cfg.AckWait > 0 {
+        opts = append(opts, nats.AckWait(cfg.AckWait))
+    }
+    if cfg.MaxDeliver > 0 {
+        opts = append(opts, nats.MaxDeliver(cfg.MaxDeliver))
+    }
+    if cfg.MaxAckPending > 0 {
+        opts = append(opts, nats.MaxAckPending(cfg.MaxAckPending))
+    }
+
+    // Pull subscribe
+    sub, err := s.js.PullSubscribe(filter, durable, opts...)
 	if err != nil {
 		return nil, err
 	}
-    return &jsConsumer{sub: sub, batchSize: cfg.BatchSize}, nil
+    // Default BatchTimeout to a conservative value if not set to ensure
+    // PullBatch() does not block indefinitely when caller context has no deadline.
+    batchTimeout := cfg.BatchTimeout
+    if batchTimeout <= 0 {
+        batchTimeout = 5 * time.Second
+    }
+    return &jsConsumer{sub: sub, batchSize: cfg.BatchSize, batchTimeout: batchTimeout}, nil
 }
 
 func (s *jetStream) Close() error {
