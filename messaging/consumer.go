@@ -9,10 +9,39 @@ import (
 )
 
 type ConsumerConfig struct {
-	Subject   string
-	BatchSize int
-	AckWait   time.Duration
-	Durable   string
+    // Subject is the primary subject this consumer will pull from
+    Subject string
+
+    // Subjects allows passing multiple subjects for reference/use by callers
+    // (e.g., to ensure a stream). Not directly used by pull consumer creation.
+    Subjects []string
+
+    // FilterSubject sets the filter subject on the server-side consumer.
+    // If empty, Subject is used.
+    FilterSubject string
+
+    // ConsumerGroup is a friendly alias for Durable when using pull consumers.
+    // If Durable is empty and ConsumerGroup is set, it will be used as durable name.
+    ConsumerGroup string
+
+    // Durable is the durable consumer name
+    Durable string
+
+    // BatchSize controls how many messages to pull per fetch
+    BatchSize int
+
+    // BatchTimeout is the default timeout applied to Fetch calls when the
+    // provided context has no deadline.
+    BatchTimeout time.Duration
+
+    // AckWait sets the server-side ack wait duration
+    AckWait time.Duration
+
+    // MaxDeliver configures the maximum redeliveries for a message
+    MaxDeliver int
+
+    // MaxAckPending caps the number of outstanding unacked messages
+    MaxAckPending int
 }
 
 type Consumer interface {
@@ -22,11 +51,23 @@ type Consumer interface {
 
 type jsConsumer struct {
     sub       *nats.Subscription
-	batchSize int
+    batchSize    int
+    batchTimeout time.Duration
 }
 
 func (c *jsConsumer) PullBatch(ctx context.Context) ([]*Message, error) {
-	msgs, err := c.sub.Fetch(c.batchSize, nats.Context(ctx))
+    // Respect caller context; if no deadline and we have a default timeout,
+    // apply it so Fetch does not block indefinitely.
+    pullCtx := ctx
+    if c.batchTimeout > 0 {
+        if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+            var cancel context.CancelFunc
+            pullCtx, cancel = context.WithTimeout(ctx, c.batchTimeout)
+            defer cancel()
+        }
+    }
+
+    msgs, err := c.sub.Fetch(c.batchSize, nats.Context(pullCtx))
 	if err != nil {
 		return nil, err
 	}
