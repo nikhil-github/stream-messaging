@@ -1,11 +1,12 @@
 package messaging
 
 import (
-	"context"
-	"log/slog"
-	"time"
+    "context"
+    "fmt"
+    "log/slog"
+    "time"
 
-	"github.com/nats-io/nats.go"
+    "github.com/nats-io/nats.go"
 )
 
 type ConsumerConfig struct {
@@ -21,7 +22,7 @@ type Consumer interface {
 }
 
 type jsConsumer struct {
-	sub       *nats.PullSubscription
+    sub       *nats.Subscription
 	batchSize int
 	logger    *slog.Logger
 }
@@ -35,16 +36,44 @@ func (c *jsConsumer) PullBatch(ctx context.Context) ([]*Message, error) {
 		return nil, err
 	}
 
-	out := make([]*Message, 0, len(msgs))
-	for _, m := range msgs {
-		out = append(out, &Message{
-			Subject:   m.Subject,
-			Data:      m.Data,
-			Headers:   map[string]string{},
-			Timestamp: time.Now().Unix(),
-			raw:       m,
-		})
-	}
+    out := make([]*Message, 0, len(msgs))
+    for _, m := range msgs {
+        // Map headers (first value per key)
+        hdrs := map[string]string{}
+        if m.Header != nil {
+            for k, vs := range m.Header {
+                if len(vs) > 0 {
+                    hdrs[k] = vs[0]
+                }
+            }
+        }
+
+        // Derive message ID from header or metadata
+        id := ""
+        if m.Header != nil {
+            id = m.Header.Get("Nats-Msg-Id")
+        }
+
+        // Timestamp from JetStream metadata when available
+        ts := time.Now().Unix()
+        if meta, err := m.Metadata(); err == nil {
+            if id == "" {
+                id = fmt.Sprintf("%s:%d", meta.Stream, meta.Sequence.Stream)
+            }
+            if !meta.Timestamp.IsZero() {
+                ts = meta.Timestamp.Unix()
+            }
+        }
+
+        out = append(out, &Message{
+            ID:        id,
+            Subject:   m.Subject,
+            Data:      m.Data,
+            Headers:   hdrs,
+            Timestamp: ts,
+            raw:       m,
+        })
+    }
 
 	if c.logger != nil {
 		c.logger.Info("Fetched batch", "count", len(out))
