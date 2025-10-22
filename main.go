@@ -1,58 +1,115 @@
 package main
 
 import (
-    "log/slog"
-    "os"
-    "time"
+	"context"
+	"log/slog"
+	"os"
+	"time"
 
-    "stream-messaging/messaging"
+	"stream-messaging/broker"
 )
 
 func main() {
-    logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-    natsURL := os.Getenv("NATS_URL")
-    if natsURL == "" {
-        natsURL = "nats://localhost:4222"
-    }
+	// Get broker URL from environment (defaults to NATS)
+	brokerURL := os.Getenv("BROKER_URL")
+	if brokerURL == "" {
+		brokerURL = "nats://localhost:4222"
+	}
 
-    stream, err := messaging.NewStream(natsURL)
-    if err != nil {
-        logger.Error("Failed to connect to NATS", "url", natsURL, "error", err)
-        os.Exit(1)
-    }
-    defer stream.Close()
+	// Create a broker client - implementation is abstracted!
+	client, err := broker.NewClient(brokerURL)
+	if err != nil {
+		logger.Error("Failed to connect to broker", "url", brokerURL, "error", err)
+		os.Exit(1)
+	}
+	defer client.Close()
 
-    // Ensure streams
-    if err := stream.EnsureStream("PAYMENT_STREAM", []string{"payments.*"}); err != nil {
-        logger.Error("Failed to ensure stream", "stream", "PAYMENT_STREAM", "error", err)
-        os.Exit(1)
-    }
-    if err := stream.EnsureStream("ORDER_STREAM", []string{"orders.*"}); err != nil {
-        logger.Error("Failed to ensure stream", "stream", "ORDER_STREAM", "error", err)
-        os.Exit(1)
-    }
+	// Ensure streams exist (optional - streams can be created by infra team)
+	if err := client.EnsureStream("PAYMENT_STREAM", []string{"payments.*"}); err != nil {
+		logger.Error("Failed to ensure stream", "stream", "PAYMENT_STREAM", "error", err)
+		os.Exit(1)
+	}
+	if err := client.EnsureStream("ORDER_STREAM", []string{"orders.*"}); err != nil {
+		logger.Error("Failed to ensure stream", "stream", "ORDER_STREAM", "error", err)
+		os.Exit(1)
+	}
 
-    // Consumer
-    consumer, err := stream.NewConsumer("PAYMENT_STREAM", messaging.ConsumerConfig{
-        Subject:   "payments.received",
-        BatchSize: 10,
-        AckWait:   30 * time.Second,
-        Durable:   "payment-worker",
-    })
-    if err != nil {
-        logger.Error("Failed to create consumer", "error", err)
-        os.Exit(1)
-    }
-    _ = consumer
+	// Create a consumer
+	consumer, err := client.NewConsumer("PAYMENT_STREAM", broker.ConsumerConfig{
+		Subject:       "payments.received",
+		BatchSize:     10,
+		AckWait:       30 * time.Second,
+		Durable:       "payment-worker",
+		MaxDeliver:    5,
+		MaxAckPending: 100,
+	})
+	if err != nil {
+		logger.Error("Failed to create consumer", "error", err)
+		os.Exit(1)
+	}
+	defer consumer.Close()
 
-    // Publisher
-    publisher, err := stream.NewPublisher("ORDER_STREAM")
-    if err != nil {
-        logger.Error("Failed to create publisher", "error", err)
-        os.Exit(1)
-    }
-    _ = publisher
+	// Create a publisher
+	publisher, err := client.NewPublisher("ORDER_STREAM")
+	if err != nil {
+		logger.Error("Failed to create publisher", "error", err)
+		os.Exit(1)
+	}
+	defer publisher.Close()
 
-    // Your PaymentConsumer / OrderPublisher service logic here
+	// Example: Publish a message with new API
+	ctx := context.Background()
+	err = publisher.Publish(ctx, "orders.created", []byte("order-123"), &broker.PublishOptions{
+		MessageID: "msg-001",
+		Headers: map[string]string{
+			"user-id": "user-456",
+		},
+	})
+	if err != nil {
+		logger.Error("Failed to publish message", "error", err)
+	} else {
+		logger.Info("Published message successfully")
+	}
+
+	// Example: Pull batch of messages
+	// Note: Timeout is NOT an error - returns empty slice if no messages available
+	messages, err := consumer.PullBatch(ctx)
+	if err != nil {
+		// This is a real error (connection issue, etc.)
+		logger.Error("Failed to pull messages", "error", err)
+	} else if len(messages) == 0 {
+		// No messages available - this is normal, not an error
+		logger.Info("No messages available at this time")
+	} else {
+		logger.Info("Pulled messages", "count", len(messages))
+		for _, msg := range messages {
+			logger.Info("Processing message",
+				"id", msg.ID,
+				"subject", msg.Subject,
+				"data", string(msg.Data))
+			// Process message...
+			msg.Ack()
+		}
+	}
+
+	// Example: Subscribe for continuous consumption (optional)
+	// Uncomment to use channel-based consumption
+	/*
+		msgChan, err := consumer.Subscribe(ctx)
+		if err != nil {
+			logger.Error("Failed to subscribe", "error", err)
+			os.Exit(1)
+		}
+		for msg := range msgChan {
+			logger.Info("Received message",
+				"id", msg.ID,
+				"subject", msg.Subject,
+				"data", string(msg.Data))
+			msg.Ack()
+		}
+	*/
+
+	logger.Info("Example completed successfully")
 }
