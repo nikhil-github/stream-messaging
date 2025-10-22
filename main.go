@@ -22,7 +22,6 @@ func main() {
         os.Exit(1)
     }
     defer stream.Close()
-    stream = stream.WithLogger(logger)
 
     // Ensure streams
     if err := stream.EnsureStream("PAYMENT_STREAM", []string{"payments.*"}); err != nil {
