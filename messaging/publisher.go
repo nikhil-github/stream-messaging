@@ -1,11 +1,12 @@
 package messaging
 
 import (
-	"context"
-	"errors"
-	"log/slog"
+    "context"
+    "errors"
+    "log/slog"
+    "time"
 
-	"github.com/nats-io/nats.go"
+    "github.com/nats-io/nats.go"
 )
 
 type PublishOptions struct {
@@ -23,6 +24,54 @@ type jsPublisher struct {
 	js     nats.JetStreamContext
 	stream string
 	logger *slog.Logger
+}
+
+// RunConsumer is a helper that loops fetching batches and invoking a handler.
+// It handles basic backoff on fetch errors and acknowledges messages based on handler result.
+type HandlerFunc func(context.Context, *Message) error
+
+type RunConsumerOptions struct {
+    // Deprecated: the batch size is specified when creating the Consumer; this is kept for API symmetry.
+    FetchBatchSize int
+    // Sleep on fetch error before retrying
+    FetchErrorBackoff time.Duration
+}
+
+func RunConsumer(ctx context.Context, c Consumer, handler HandlerFunc, opts RunConsumerOptions) error {
+    batchSize := opts.FetchBatchSize
+    if batchSize <= 0 {
+        batchSize = 32
+    }
+    backoff := opts.FetchErrorBackoff
+    if backoff <= 0 {
+        backoff = time.Second
+    }
+
+    for {
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        default:
+        }
+
+        msgs, err := c.PullBatch(ctx)
+        if err != nil {
+            select {
+            case <-ctx.Done():
+                return ctx.Err()
+            default:
+            }
+            time.Sleep(backoff)
+            continue
+        }
+        for _, m := range msgs {
+            if err := handler(ctx, m); err != nil {
+                _ = m.Nak()
+            } else {
+                _ = m.Ack()
+            }
+        }
+    }
 }
 
 func (p *jsPublisher) Publish(ctx context.Context, data []byte, opts *PublishOptions) error {
