@@ -3,7 +3,6 @@ package messaging
 import (
 	"context"
 	"errors"
-	"log/slog"
 
 	"github.com/nats-io/nats.go"
 )
@@ -22,7 +21,6 @@ type Publisher interface {
 type jsPublisher struct {
 	js     nats.JetStreamContext
 	stream string
-	logger *slog.Logger
 }
 
 func (p *jsPublisher) Publish(ctx context.Context, data []byte, opts *PublishOptions) error {
@@ -52,15 +50,10 @@ func (p *jsPublisher) Publish(ctx context.Context, data []byte, opts *PublishOpt
 
     pa, err := p.js.PublishMsg(msg, pubOpts...)
 	if err != nil {
-		if p.logger != nil {
-			p.logger.Warn("Failed to publish", "subject", opts.Subject, "error", err)
-		}
 		return err
 	}
 
-	if p.logger != nil {
-		p.logger.Info("Published message", "subject", opts.Subject, "seq", pa.Sequence)
-	}
+    _ = pa
 	return nil
 }
 

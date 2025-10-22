@@ -2,7 +2,10 @@ module stream-messaging
 
 go 1.24.2
 
-require github.com/nats-io/nats.go v1.47.0
+require (
+	github.com/golang/mock v1.6.0
+	github.com/nats-io/nats.go v1.47.0
+)
 
 require (
 	github.com/klauspost/compress v1.18.0 // indirect

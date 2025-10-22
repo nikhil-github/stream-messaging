@@ -3,7 +3,6 @@ package messaging
 import (
     "context"
     "fmt"
-    "log/slog"
     "time"
 
     "github.com/nats-io/nats.go"
@@ -24,15 +23,11 @@ type Consumer interface {
 type jsConsumer struct {
     sub       *nats.Subscription
 	batchSize int
-	logger    *slog.Logger
 }
 
 func (c *jsConsumer) PullBatch(ctx context.Context) ([]*Message, error) {
 	msgs, err := c.sub.Fetch(c.batchSize, nats.Context(ctx))
 	if err != nil {
-		if c.logger != nil {
-			c.logger.Warn("Failed to fetch batch", "error", err)
-		}
 		return nil, err
 	}
 
@@ -75,9 +70,6 @@ func (c *jsConsumer) PullBatch(ctx context.Context) ([]*Message, error) {
         })
     }
 
-	if c.logger != nil {
-		c.logger.Info("Fetched batch", "count", len(out))
-	}
 	return out, nil
 }
 

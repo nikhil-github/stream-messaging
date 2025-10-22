@@ -2,8 +2,6 @@ package messaging
 
 import (
     "fmt"
-    "log/slog"
-    "os"
 
     "github.com/nats-io/nats.go"
 )
@@ -11,7 +9,6 @@ import (
 type jetStream struct {
 	nc     *nats.Conn
 	js     nats.JetStreamContext
-	logger *slog.Logger
 }
 
 func NewStream(url string) (Stream, error) {
@@ -25,19 +22,12 @@ func NewStream(url string) (Stream, error) {
 		return nil, fmt.Errorf("jetstream: %w", err)
 	}
 
-    defaultLogger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	return &jetStream{nc: nc, js: js, logger: defaultLogger}, nil
-}
-
-func (s *jetStream) WithLogger(logger *slog.Logger) Stream {
-	s.logger = logger
-	return s
+    return &jetStream{nc: nc, js: js}, nil
 }
 
 func (s *jetStream) EnsureStream(streamName string, subjects []string) error {
 	_, err := s.js.StreamInfo(streamName)
 	if err == nil {
-		s.logger.Info("Stream exists", "stream", streamName)
 		return nil
 	}
 	if err == nats.ErrStreamNotFound {
@@ -47,15 +37,12 @@ func (s *jetStream) EnsureStream(streamName string, subjects []string) error {
 			Storage:  nats.FileStorage,
 			Replicas: 1,
 		})
-		if err == nil {
-			s.logger.Info("Stream created", "stream", streamName, "subjects", subjects)
-		}
 	}
 	return err
 }
 
 func (s *jetStream) NewPublisher(streamName string) (Publisher, error) {
-	return &jsPublisher{js: s.js, stream: streamName, logger: s.logger}, nil
+    return &jsPublisher{js: s.js, stream: streamName}, nil
 }
 
 func (s *jetStream) NewConsumer(streamName string, cfg ConsumerConfig) (Consumer, error) {
@@ -66,7 +53,7 @@ func (s *jetStream) NewConsumer(streamName string, cfg ConsumerConfig) (Consumer
 	if err != nil {
 		return nil, err
 	}
-	return &jsConsumer{sub: sub, batchSize: cfg.BatchSize, logger: s.logger}, nil
+    return &jsConsumer{sub: sub, batchSize: cfg.BatchSize}, nil
 }
 
 func (s *jetStream) Close() error {
