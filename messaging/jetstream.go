@@ -1,10 +1,11 @@
 package messaging
 
 import (
-	"fmt"
-	"log/slog"
+    "fmt"
+    "log/slog"
+    "os"
 
-	"github.com/nats-io/nats.go"
+    "github.com/nats-io/nats.go"
 )
 
 type jetStream struct {
@@ -24,7 +25,7 @@ func NewStream(url string) (Stream, error) {
 		return nil, fmt.Errorf("jetstream: %w", err)
 	}
 
-	defaultLogger := slog.New(slog.NewTextHandler(nil))
+    defaultLogger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	return &jetStream{nc: nc, js: js, logger: defaultLogger}, nil
 }
 

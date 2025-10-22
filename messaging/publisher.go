@@ -1,5 +1,4 @@
 package messaging
-package messaging
 
 import (
 	"context"
@@ -35,6 +34,10 @@ func (p *jsPublisher) Publish(ctx context.Context, data []byte, opts *PublishOpt
 	if opts.MessageID != "" {
 		pubOpts = append(pubOpts, nats.MsgId(opts.MessageID))
 	}
+    // Ensure publish respects the provided context for timeout/cancel
+    if ctx != nil {
+        pubOpts = append(pubOpts, nats.Context(ctx))
+    }
 
 	msg := &nats.Msg{
 		Subject: opts.Subject,
@@ -47,7 +50,7 @@ func (p *jsPublisher) Publish(ctx context.Context, data []byte, opts *PublishOpt
 		}
 	}
 
-	pa, err := p.js.PublishMsg(msg, pubOpts...)
+    pa, err := p.js.PublishMsg(msg, pubOpts...)
 	if err != nil {
 		if p.logger != nil {
 			p.logger.Warn("Failed to publish", "subject", opts.Subject, "error", err)
