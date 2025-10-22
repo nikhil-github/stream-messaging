@@ -16,6 +16,16 @@ type ConsumerConfig struct {
 	Durable   string
 }
 
+// ConsumerOptions defines server-side consumer configuration to ensure a durable.
+// This is a subset commonly used in production; can be expanded as needed.
+type ConsumerOptions struct {
+    FilterSubject string
+    AckWait       time.Duration
+    MaxDeliver    int
+    // Optional backoff schedule for redeliveries if MaxDeliver > 0
+    Backoff       []time.Duration
+}
+
 type Consumer interface {
 	PullBatch(ctx context.Context) ([]*Message, error)
 	Close() error
@@ -81,4 +91,14 @@ func (c *jsConsumer) PullBatch(ctx context.Context) ([]*Message, error) {
 	return out, nil
 }
 
-func (c *jsConsumer) Close() error { return nil }
+func (c *jsConsumer) Close() error {
+    if c.sub == nil {
+        return nil
+    }
+    // Best-effort drain to allow in-flight acks to complete, else Unsubscribe
+    if err := c.sub.Drain(); err != nil {
+        // Fallback to Unsubscribe
+        _ = c.sub.Unsubscribe()
+    }
+    return nil
+}
