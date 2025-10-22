@@ -2,6 +2,7 @@ package messaging
 
 import (
     "context"
+    "errors"
     "fmt"
     "time"
 
@@ -68,9 +69,21 @@ func (c *jsConsumer) PullBatch(ctx context.Context) ([]*Message, error) {
     }
 
     msgs, err := c.sub.Fetch(c.batchSize, nats.Context(pullCtx))
-	if err != nil {
-		return nil, err
-	}
+    if err != nil {
+        // If the fetch timed out or the context deadline was reached, we may
+        // still have received some messages. In that case, return the partial
+        // batch and suppress the timeout error. If we received no messages,
+        // treat it as an empty batch rather than a hard error.
+        if len(msgs) > 0 && (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout)) {
+            // proceed with msgs, clear error
+            err = nil
+        } else if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, nats.ErrTimeout) {
+            // No messages available within the timeout window; return empty batch
+            return nil, nil
+        } else {
+            return nil, err
+        }
+    }
 
     out := make([]*Message, 0, len(msgs))
     for _, m := range msgs {

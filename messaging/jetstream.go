@@ -2,6 +2,7 @@ package messaging
 
 import (
     "fmt"
+    "time"
 
     "github.com/nats-io/nats.go"
 )
@@ -77,7 +78,13 @@ func (s *jetStream) NewConsumer(streamName string, cfg ConsumerConfig) (Consumer
 	if err != nil {
 		return nil, err
 	}
-    return &jsConsumer{sub: sub, batchSize: cfg.BatchSize, batchTimeout: cfg.BatchTimeout}, nil
+    // Default BatchTimeout to a conservative value if not set to ensure
+    // PullBatch() does not block indefinitely when caller context has no deadline.
+    batchTimeout := cfg.BatchTimeout
+    if batchTimeout <= 0 {
+        batchTimeout = 5 * time.Second
+    }
+    return &jsConsumer{sub: sub, batchSize: cfg.BatchSize, batchTimeout: batchTimeout}, nil
 }
 
 func (s *jetStream) Close() error {
